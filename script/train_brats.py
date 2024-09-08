@@ -9,6 +9,7 @@ import autorootcwd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+from scipy.ndimage import zoom
 
 join = os.path.join
 from tqdm import tqdm
@@ -61,19 +62,31 @@ class NpyDataset(Dataset):
         self.data_root = data_root
         self.gt_path = join(data_root, "gts")
         self.img_path = join(data_root, "imgs")
+        
+        # Determine dataset type based on data_root subfolder name
+        if 'brats' in data_root.lower():
+            self.dataset_type = 'brats'
+        elif 'coco' in data_root.lower():
+            self.dataset_type = 'coco'
+        else:
+            raise ValueError("Unknown dataset type. The dataset should contain 'brats' or 'coco' in the path.")
+        
+        # Load ground truth files and filter based on dataset type
         self.gt_path_files = sorted(
-            glob.glob(join(self.gt_path, "*.npy"), recursive=True)
+            glob.glob(join(self.gt_path, "**/*.npy"), recursive=True)
         )
-        # self.gt_path_files = [
-        #     file
-        #     for file in self.gt_path_files
-        #     if os.path.isfile(join(self.img_path, os.path.basename(file)))
-        # ]
-        self.gt_path_files = [
-            file
-            for file in self.gt_path_files
-            if os.path.isfile(join(self.img_path, '_'.join(os.path.basename(file).split('_')[:2]) + ".npy"))
-        ]
+        if self.dataset_type == 'brats':
+            self.gt_path_files = [
+                file
+                for file in self.gt_path_files
+                if os.path.isfile(join(self.img_path, '_'.join(os.path.basename(file).split('_')[:2]) + ".npy"))
+            ]
+        elif self.dataset_type == 'coco':
+            self.gt_path_files = [
+                file
+                for file in self.gt_path_files
+                if os.path.isfile(join(self.img_path, os.path.basename(file).split('_')[0] + ".npy"))
+            ]
 
         self.bbox_shift = bbox_shift
         print(f"number of images: {len(self.gt_path_files)}")
@@ -82,40 +95,42 @@ class NpyDataset(Dataset):
         return len(self.gt_path_files)
 
     def __getitem__(self, index):
-        # load npy image (1024, 1024, 3), [0,1]
         img_name = os.path.basename(self.gt_path_files[index])
 
-        img_name = '_'.join(img_name.split('_')[:2]) + '.npy'
+        # Adjust image name processing based on dataset type
+        if self.dataset_type == 'brats':
+            img_name = img_name.split('_')[0] + '_' + img_name.split('_')[1] + '.npy'
+        elif self.dataset_type == 'coco':
+            img_name = img_name.split('_')[0] + '.npy'
 
         img_1024 = np.load(
             join(self.img_path, img_name), "r", allow_pickle=True
         )  # (1024, 1024, 3)
-        # convert the shape to (3, H, W)
         img_1024 = np.transpose(img_1024, (2, 0, 1))
         assert (
             np.max(img_1024) <= 1.0 and np.min(img_1024) >= 0.0
         ), "image should be normalized to [0, 1]"
-        gt = np.load(
-            self.gt_path_files[index], "r", allow_pickle=True
-        )  # multiple labels [0, 1,4,5...], (256,256)
-        # assert img_name == os.path.basename(self.gt_path_files[index]), (
-        #     "img gt name error" + self.gt_path_files[index] + self.npy_files[index]
-        # )
-        label_ids = np.unique(gt)[1:]
-        gt2D = np.uint8(
-            gt == random.choice(label_ids.tolist())
-        )  # only one label, (256, 256)
+
+        gt = np.load(self.gt_path_files[index], "r", allow_pickle=True)  # (256, 256)
+        gt_1024 = zoom(gt, (4, 4), order=0)  # Resize to (1024, 1024) with nearest-neighbor
+
+        gt_1024 = (gt_1024 > 0).astype(np.uint8)
+
+        label_ids = np.unique(gt_1024)[1:]  # Skip the background (assumed to be 0)
+        gt2D = np.uint8(gt_1024 == random.choice(label_ids.tolist()))  # only one label, (1024, 1024)
         assert np.max(gt2D) == 1 and np.min(gt2D) == 0.0, "ground truth should be 0, 1"
+
         y_indices, x_indices = np.where(gt2D > 0)
         x_min, x_max = np.min(x_indices), np.max(x_indices)
         y_min, y_max = np.min(y_indices), np.max(y_indices)
-        # add perturbation to bounding box coordinates
+        
         H, W = gt2D.shape
         x_min = max(0, x_min - random.randint(0, self.bbox_shift))
         x_max = min(W, x_max + random.randint(0, self.bbox_shift))
         y_min = max(0, y_min - random.randint(0, self.bbox_shift))
         y_max = min(H, y_max + random.randint(0, self.bbox_shift))
         bboxes = np.array([x_min, y_min, x_max, y_max])
+
         return (
             torch.tensor(img_1024).float(),
             torch.tensor(gt2D[None, :, :]).long(),
@@ -123,11 +138,141 @@ class NpyDataset(Dataset):
             img_name,
         )
 
+# class NpyDataset(Dataset):
+#     def __init__(self, data_root, bbox_shift=20):
+#         self.data_root = data_root
+#         self.gt_path = join(data_root, "gts")
+#         self.img_path = join(data_root, "imgs")
+#         self.gt_path_files = sorted(
+#             glob.glob(join(self.gt_path, "**/*.npy"), recursive=True)
+#         )
+#         self.gt_path_files = [
+#             file
+#             for file in self.gt_path_files
+#             if os.path.isfile(join(self.img_path, '_'.join(os.path.basename(file).split('_')[:2]) + ".npy"))
+#             # if os.path.isfile(join(self.img_path, os.path.basename(file).split('_')[0] + ".npy"))
+#         ]
+#         self.bbox_shift = bbox_shift
+#         print(f"number of images: {len(self.gt_path_files)}")
 
+#     def __len__(self):
+#         return len(self.gt_path_files)
+
+#     def __getitem__(self, index):
+#         # load npy image (1024, 1024, 3), [0,1]
+#         img_name = os.path.basename(self.gt_path_files[index])
+#         # img_name = img_name.split('_')[0] + '.npy'
+#         img_name = img_name.split('_')[0]+'_'+img_name.split('_')[1] + '.npy'
+#         img_1024 = np.load(
+#             join(self.img_path, img_name), "r", allow_pickle=True
+#         )  # (1024, 1024, 3)
+#         # convert the shape to (3, H, W)
+#         img_1024 = np.transpose(img_1024, (2, 0, 1))
+#         assert (
+#             np.max(img_1024) <= 1.0 and np.min(img_1024) >= 0.0
+#         ), "image should be normalized to [0, 1]"
+
+#         # load and resize gt data (256, 256) to (1024, 1024)
+#         gt = np.load(self.gt_path_files[index], "r", allow_pickle=True)  # (256, 256)
+#         gt_1024 = zoom(gt, (4, 4), order=0)  # Resize to (1024, 1024) with nearest-neighbor
+
+#         gt_1024 = (gt_1024 > 0).astype(np.uint8)
+
+
+#         # gt_save_name = os.path.splitext(os.path.basename(self.gt_path_files[index]))[0] + "_resized_.png"
+#         # plt.imsave(join("gt_images", gt_save_name), gt_1024, cmap='gray')
+
+
+
+#         label_ids = np.unique(gt_1024)[1:]  # Skip the background (assumed to be 0)
+#         gt2D = np.uint8(gt_1024 == random.choice(label_ids.tolist()))  # only one label, (1024, 1024)
+#         assert np.max(gt2D) == 1 and np.min(gt2D) == 0.0, "ground truth should be 0, 1"
+
+#         y_indices, x_indices = np.where(gt2D > 0)
+#         x_min, x_max = np.min(x_indices), np.max(x_indices)
+#         y_min, y_max = np.min(y_indices), np.max(y_indices)
+        
+#         # add perturbation to bounding box coordinates
+#         H, W = gt2D.shape
+#         x_min = max(0, x_min - random.randint(0, self.bbox_shift))
+#         x_max = min(W, x_max + random.randint(0, self.bbox_shift))
+#         y_min = max(0, y_min - random.randint(0, self.bbox_shift))
+#         y_max = min(H, y_max + random.randint(0, self.bbox_shift))
+#         bboxes = np.array([x_min, y_min, x_max, y_max])
+
+#         return (
+#             torch.tensor(img_1024).float(),
+#             torch.tensor(gt2D[None, :, :]).long(),
+#             torch.tensor(bboxes).float(),
+#             img_name,
+#         )
+
+
+# %% set up parser
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "-i",
+    "--tr_npy_path",
+    type=str,
+    default="/mnt/sda/minkyukim/sam_dataset/brats_npy_train_dataset_1024image",
+    help="path to training npy files; two subfolders: gts and imgs",
+)
+parser.add_argument("-task_name", type=str, default="MedSAM-ViT-B")
+parser.add_argument("-model_type", type=str, default="vit_b")
+parser.add_argument(
+    "-checkpoint", type=str, default="work_dir/SAM/sam_vit_b_01ec64.pth"
+)
+# parser.add_argument('-device', type=str, default='cuda:0')
+parser.add_argument(
+    "--load_pretrain", type=bool, default=True, help="load pretrain model"
+)
+parser.add_argument("-pretrain_model_path", type=str, default="")
+parser.add_argument("-work_dir", type=str, default="./work_dir")
+# train
+parser.add_argument("-num_epochs", type=int, default=1000)
+parser.add_argument("-batch_size", type=int, default=5)
+parser.add_argument("-num_workers", type=int, default=0)
+# Optimizer parameters
+parser.add_argument(
+    "-weight_decay", type=float, default=0.01, help="weight decay (default: 0.01)"
+)
+parser.add_argument(
+    "-lr", type=float, default=0.0001, metavar="LR", help="learning rate (absolute lr)"
+)
+parser.add_argument(
+    "-use_wandb", type=bool, default=False, help="use wandb to monitor training"
+)
+parser.add_argument("-use_amp", action="store_true", default=False, help="use amp")
+parser.add_argument(
+    "--resume", type=str, default="", help="Resuming training from checkpoint"
+)
+parser.add_argument("--device", type=str, default="cuda:1")
+args = parser.parse_args()
+
+if args.use_wandb:
+    import wandb
+
+    wandb.login()
+    wandb.init(
+        project=args.task_name,
+        config={
+            "lr": args.lr,
+            "batch_size": args.batch_size,
+            "data_path": args.tr_npy_path,
+            "model_type": args.model_type,
+        },
+    )
+
+# %% set up model for training
+# device = args.device
+run_id = datetime.now().strftime("%Y%m%d-%H%M")
+model_save_path = "../../../../../../mnt/sda/minkyukim/pth/sam-tutorial_brats"
+#join(args.work_dir, args.task_name + "-" + run_id)
+device = torch.device(args.device)
 
 
 # %% sanity test of dataset class
-tr_dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/brats_npy_train_dataset")
+tr_dataset = NpyDataset(args.tr_npy_path )
 tr_dataloader = DataLoader(tr_dataset, batch_size=8, shuffle=True)
 for step, (image, gt, bboxes, names_temp) in enumerate(tr_dataloader):
     print(image.shape, gt.shape, bboxes.shape)
@@ -149,72 +294,10 @@ for step, (image, gt, bboxes, names_temp) in enumerate(tr_dataloader):
     axs[1].set_title(names_temp[idx])
     # plt.show()
     plt.subplots_adjust(wspace=0.01, hspace=0)
-    plt.savefig("./data_sanitycheck.png", bbox_inches="tight", dpi=300)
+    plt.savefig("./data_sanitycheck_brats.png", bbox_inches="tight", dpi=300)
     plt.close()
     break
-
-# %% set up parser
-parser = argparse.ArgumentParser()
-parser.add_argument(
-    "-i",
-    "--tr_npy_path",
-    type=str,
-    default="/mnt/sda/minkyukim/sam_dataset/brats_npy_train_dataset",
-    help="path to training npy files; two subfolders: gts and imgs",
-)
-parser.add_argument("-task_name", type=str, default="MedSAM-ViT-B")
-parser.add_argument("-model_type", type=str, default="vit_b")
-parser.add_argument(
-    "-checkpoint", type=str, default="work_dir/SAM/sam_vit_b_01ec64.pth"
-)
-# parser.add_argument('-device', type=str, default='cuda:0')
-parser.add_argument(
-    "--load_pretrain", type=bool, default=True, help="load pretrain model"
-)
-parser.add_argument("-pretrain_model_path", type=str, default="")
-parser.add_argument("-work_dir", type=str, default="./work_dir")
-# train
-parser.add_argument("-num_epochs", type=int, default=1000)
-parser.add_argument("-batch_size", type=int, default=2)
-parser.add_argument("-num_workers", type=int, default=0)
-# Optimizer parameters
-parser.add_argument(
-    "-weight_decay", type=float, default=0.01, help="weight decay (default: 0.01)"
-)
-parser.add_argument(
-    "-lr", type=float, default=0.0001, metavar="LR", help="learning rate (absolute lr)"
-)
-parser.add_argument(
-    "-use_wandb", type=bool, default=False, help="use wandb to monitor training"
-)
-parser.add_argument("-use_amp", action="store_true", default=False, help="use amp")
-parser.add_argument(
-    "--resume", type=str, default="", help="Resuming training from checkpoint"
-)
-parser.add_argument("--device", type=str, default="cuda:0")
-args = parser.parse_args()
-
-if args.use_wandb:
-    import wandb
-
-    wandb.login()
-    wandb.init(
-        project=args.task_name,
-        config={
-            "lr": args.lr,
-            "batch_size": args.batch_size,
-            "data_path": args.tr_npy_path,
-            "model_type": args.model_type,
-        },
-    )
-
-# %% set up model for training
-# device = args.device
-run_id = datetime.now().strftime("%Y%m%d-%H%M")
-model_save_path = join(args.work_dir, args.task_name + "-" + run_id)
-device = torch.device(args.device)
 # %% set up model
-
 
 class MedSAM(nn.Module):
     def __init__(
@@ -342,7 +425,6 @@ def main():
                 optimizer.zero_grad()
             else:
                 medsam_pred = medsam_model(image, boxes_np)
-                medsam_pred = F.interpolate(medsam_pred, size=(256, 256), mode='bilinear', align_corners=False)
                 loss = seg_loss(medsam_pred, gt2D) + ce_loss(medsam_pred, gt2D.float())
                 loss.backward()
                 optimizer.step()
@@ -359,21 +441,21 @@ def main():
             f'Time: {datetime.now().strftime("%Y%m%d-%H%M")}, Epoch: {epoch}, Loss: {epoch_loss}'
         )
         ## save the latest model
-        checkpoint = {
-            "model": medsam_model.state_dict(),
-            "optimizer": optimizer.state_dict(),
-            "epoch": epoch,
-        }
-        torch.save(checkpoint, join(model_save_path, "medsam_model_latest.pth"))
+        # checkpoint = {
+        #     "model": medsam_model.state_dict(),
+        #     "optimizer": optimizer.state_dict(),
+        #     "epoch": epoch,
+        # }
+        torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_new.pth"))
         ## save the best model
         if epoch_loss < best_loss:
             best_loss = epoch_loss
-            checkpoint = {
-                "model": medsam_model.state_dict(),
-                "optimizer": optimizer.state_dict(),
-                "epoch": epoch,
-            }
-            torch.save(checkpoint, join(model_save_path, "medsam_model_best.pth"))
+            # checkpoint = {
+            #     "model": medsam_model.state_dict(),
+            #     "optimizer": optimizer.state_dict(),
+            #     "epoch": epoch,
+            # }
+            torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_new.pth"))
 
         # %% plot loss
         plt.plot(losses)

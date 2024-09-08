@@ -3,21 +3,18 @@ import numpy as np
 from PIL import Image
 from tqdm import tqdm
 
-# 입력 경로 설정
-image_folder = "/mnt/sda/minkyukim/coco2017/image_train"
-mask_folder = "/mnt/sda/minkyukim/coco2017/label_train"
+image_folder = "/mnt/sda/minkyukim/coco2017/image_val"
+mask_folder = "/mnt/sda/minkyukim/coco2017/label_val"
 
-# 출력 경로 설정
-output_image_folder = "/mnt/sda/minkyukim/sam_dataset/coco_npy_train_dataset/imgs"
-output_mask_folder = "/mnt/sda/minkyukim/sam_dataset/coco_npy_train_dataset/gts"
+output_image_folder = "/mnt/sda/minkyukim/sam_dataset/coco_npy_test_dataset_1024image/imgs"
+output_mask_folder = "/mnt/sda/minkyukim/sam_dataset/coco_npy_test_dataset_1024image/gts"
 
-# 폴더가 없으면 생성
 os.makedirs(output_image_folder, exist_ok=True)
 os.makedirs(output_mask_folder, exist_ok=True)
 
 def process_image(image_path, output_path):
     img = Image.open(image_path).convert('RGB')  # 알파 채널 제거하고 RGB로 변환
-    img_resized = img.resize((256, 256))
+    img_resized = img.resize((1024, 1024))
 
     img_array = np.array(img_resized, dtype=np.float32) / 255.0
 

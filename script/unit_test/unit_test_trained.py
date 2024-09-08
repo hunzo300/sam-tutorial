@@ -1,30 +1,36 @@
 import autorootcwd
-import os
-import random
-import torch
-import torch.nn.functional as F
 import matplotlib.pyplot as plt
+import torch
 import numpy as np
+import os
+import torch.nn.functional as F
 
-from script.train import NpyDataset, show_mask, show_box, MedSAM, sam_model_registry, device, args
+from script.train import NpyDataset, show_mask, show_box, MedSAM, sam_model_registry, device, args, join
 
-def unit_test(random_seed=16):
-    # Set random seed for reproducibility
-    random.seed(random_seed)
-    torch.manual_seed(random_seed)
-
+def unit_test():
     # dataset
-    dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/brats_npy_train_dataset_1024image")
-    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)  # shuffle=True to get random samples
+    dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/coco_npy_train_dataset_1024image__")
+    dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
-    # load model
-    sam_model = sam_model_registry[args.model_type](checkpoint=args.checkpoint)
+    # load model with an empty checkpoint string
+    sam_model = sam_model_registry[args.model_type](checkpoint="")  # 빈 문자열을 checkpoint로 전달
+    
+    # load checkpoint manually
+    checkpoint = torch.load("/home/minkyukim/sam-tutorial/work_dir/MedSAM-ViT-B-20240902-1607/medsam_model_latest.pth", map_location=torch.device('cpu'))
+
+    # 모델의 state_dict 로드
+    sam_model.load_state_dict(checkpoint['model'])
+    
+    # MedSAM 모델 구성
     medsam_model = MedSAM(
         image_encoder=sam_model.image_encoder,
         mask_decoder=sam_model.mask_decoder,
         prompt_encoder=sam_model.prompt_encoder,
     ).to(device)
+    
     medsam_model.eval()
+
+
 
     # 샘플 데이터 가져오기
     for step, (image, gt, bboxes, names_temp) in enumerate(dataloader):
@@ -32,9 +38,9 @@ def unit_test(random_seed=16):
         image = image.to(device)
         gt = gt.to(device)
 
-
+        # predict code
         with torch.no_grad():
-
+            # bboxes는 1024x1024 
             pred_mask = medsam_model(image, bboxes.numpy()) 
 
         os.makedirs("gt_images", exist_ok=True)
@@ -51,6 +57,7 @@ def unit_test(random_seed=16):
 
         _, axs = plt.subplots(1, 3, figsize=(15, 5))
 
+        # 원본 image
         image_np = image[0].cpu().permute(1, 2, 0).numpy()
         image_np = np.clip(image_np, 0, 1) 
         axs[0].imshow(image_np)
@@ -70,10 +77,10 @@ def unit_test(random_seed=16):
         show_mask(pred_mask_resized_np, axs[2])
         axs[2].set_title("Predicted Mask")
 
-        plt.savefig(f"/home/minkyukim/sam-tutorial/output_images/unit_test_output_{names_temp[0]}.png", bbox_inches="tight", dpi=300)
+        plt.savefig(f"output_images/unit_test_output_{names_temp[0]}_new.png", bbox_inches="tight", dpi=300)
         plt.close()
 
         break
 
 if __name__ == "__main__":
-    unit_test(random_seed=12)
+    unit_test()
