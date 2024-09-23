@@ -9,6 +9,8 @@ import autorootcwd
 import numpy as np
 import matplotlib.pyplot as plt
 import os
+import scipy
+import scipy.ndimage
 from scipy.ndimage import zoom
 
 join = os.path.join
@@ -40,11 +42,13 @@ os.environ["NUMEXPR_NUM_THREADS"] = "6"  # export NUMEXPR_NUM_THREADS=6
 
 
 def show_mask(mask, ax, random_color=False):
+    mask = mask.astype(np.float32)
     if random_color:
         color = np.concatenate([np.random.random(3), np.array([0.6])], axis=0)
     else:
         color = np.array([251 / 255, 252 / 255, 30 / 255, 0.6])
     h, w = mask.shape[-2:]
+
     mask_image = mask.reshape(h, w, 1) * color.reshape(1, 1, -1)
     ax.imshow(mask_image)
 
@@ -58,10 +62,11 @@ def show_box(box, ax):
 
 
 class NpyDataset(Dataset):
-    def __init__(self, data_root, bbox_shift=20):
+    def __init__(self, data_root, bbox_shift=20, num_points=2):
         self.data_root = data_root
         self.gt_path = join(data_root, "gts")
         self.img_path = join(data_root, "imgs")
+        self.num_points = num_points  # Number of points to sample
         
         # Determine dataset type based on data_root subfolder name
         if 'brats' in data_root.lower():
@@ -71,19 +76,13 @@ class NpyDataset(Dataset):
         elif 'ivdm' in data_root.lower():
             self.dataset_type = 'ivdm'
         else:
-            raise ValueError("Unknown dataset type. The dataset should contain 'brats' or 'coco' in the path.")
+            raise ValueError("Unknown dataset type. The dataset should contain 'brats', 'coco', or 'ivdm' in the path.")
         
         # Load ground truth files and filter based on dataset type
         self.gt_path_files = sorted(
             glob.glob(join(self.gt_path, "**/*.npy"), recursive=True)
         )
-        if self.dataset_type == 'brats':
-            self.gt_path_files = [
-                file
-                for file in self.gt_path_files
-                if os.path.isfile(join(self.img_path, '_'.join(os.path.basename(file).split('_')[:2]) + ".npy"))
-            ]
-        elif self.dataset_type == 'ivdm':
+        if self.dataset_type in ['brats', 'ivdm']:
             self.gt_path_files = [
                 file
                 for file in self.gt_path_files
@@ -106,9 +105,7 @@ class NpyDataset(Dataset):
         img_name = os.path.basename(self.gt_path_files[index])
 
         # Adjust image name processing based on dataset type
-        if self.dataset_type == 'brats':
-            img_name = img_name.split('_')[0] + '_' + img_name.split('_')[1] + '.npy'
-        elif self.dataset_type == 'ivdm':
+        if self.dataset_type in ['brats', 'ivdm']:
             img_name = img_name.split('_')[0] + '_' + img_name.split('_')[1] + '.npy'
         elif self.dataset_type == 'coco':
             img_name = img_name.split('_')[0] + '.npy'
@@ -140,82 +137,75 @@ class NpyDataset(Dataset):
         y_min = max(0, y_min - random.randint(0, self.bbox_shift))
         y_max = min(H, y_max + random.randint(0, self.bbox_shift))
         bboxes = np.array([x_min, y_min, x_max, y_max])
+        
+        # Get random points from the mask
+        point_coords, point_labels = self.sample_points(gt2D, self.num_points, dilation_iterations=40)
 
         return (
             torch.tensor(img_1024).float(),
             torch.tensor(gt2D[None, :, :]).long(),
             torch.tensor(bboxes).float(),
+            torch.tensor(point_coords).float(),
+            torch.tensor(point_labels).long(),
             img_name,
         )
 
-# class NpyDataset(Dataset):
-#     def __init__(self, data_root, bbox_shift=20):
-#         self.data_root = data_root
-#         self.gt_path = join(data_root, "gts")
-#         self.img_path = join(data_root, "imgs")
-#         self.gt_path_files = sorted(
-#             glob.glob(join(self.gt_path, "**/*.npy"), recursive=True)
-#         )
-#         self.gt_path_files = [
-#             file
-#             for file in self.gt_path_files
-#             if os.path.isfile(join(self.img_path, '_'.join(os.path.basename(file).split('_')[:2]) + ".npy"))
-#             # if os.path.isfile(join(self.img_path, os.path.basename(file).split('_')[0] + ".npy"))
-#         ]
-#         self.bbox_shift = bbox_shift
-#         print(f"number of images: {len(self.gt_path_files)}")
-
-#     def __len__(self):
-#         return len(self.gt_path_files)
-
-#     def __getitem__(self, index):
-#         # load npy image (1024, 1024, 3), [0,1]
-#         img_name = os.path.basename(self.gt_path_files[index])
-#         # img_name = img_name.split('_')[0] + '.npy'
-#         img_name = img_name.split('_')[0]+'_'+img_name.split('_')[1] + '.npy'
-#         img_1024 = np.load(
-#             join(self.img_path, img_name), "r", allow_pickle=True
-#         )  # (1024, 1024, 3)
-#         # convert the shape to (3, H, W)
-#         img_1024 = np.transpose(img_1024, (2, 0, 1))
-#         assert (
-#             np.max(img_1024) <= 1.0 and np.min(img_1024) >= 0.0
-#         ), "image should be normalized to [0, 1]"
-
-#         # load and resize gt data (256, 256) to (1024, 1024)
-#         gt = np.load(self.gt_path_files[index], "r", allow_pickle=True)  # (256, 256)
-#         gt_1024 = zoom(gt, (4, 4), order=0)  # Resize to (1024, 1024) with nearest-neighbor
-
-#         gt_1024 = (gt_1024 > 0).astype(np.uint8)
-
-
-#         # gt_save_name = os.path.splitext(os.path.basename(self.gt_path_files[index]))[0] + "_resized_.png"
-#         # plt.imsave(join("gt_images", gt_save_name), gt_1024, cmap='gray')
-
-
-
-#         label_ids = np.unique(gt_1024)[1:]  # Skip the background (assumed to be 0)
-#         gt2D = np.uint8(gt_1024 == random.choice(label_ids.tolist()))  # only one label, (1024, 1024)
-#         assert np.max(gt2D) == 1 and np.min(gt2D) == 0.0, "ground truth should be 0, 1"
-
-#         y_indices, x_indices = np.where(gt2D > 0)
-#         x_min, x_max = np.min(x_indices), np.max(x_indices)
-#         y_min, y_max = np.min(y_indices), np.max(y_indices)
+    def sample_points(self, mask, num_points=2, dilation_iterations=40):
+        """
+        GT 마스크 근처에서 배경 포인트를 샘플링하는 함수.
         
-#         # add perturbation to bounding box coordinates
-#         H, W = gt2D.shape
-#         x_min = max(0, x_min - random.randint(0, self.bbox_shift))
-#         x_max = min(W, x_max + random.randint(0, self.bbox_shift))
-#         y_min = max(0, y_min - random.randint(0, self.bbox_shift))
-#         y_max = min(H, y_max + random.randint(0, self.bbox_shift))
-#         bboxes = np.array([x_min, y_min, x_max, y_max])
+        Args:
+            mask (np.ndarray): 2D 바이너리 마스크 (foreground: 1, background: 0)
+            num_points (int): 총 샘플링할 포인트 수 (기본값은 4)
+            dilation_iterations (int): 마스크를 확장하는 횟수 (확장 범위 설정)
 
-#         return (
-#             torch.tensor(img_1024).float(),
-#             torch.tensor(gt2D[None, :, :]).long(),
-#             torch.tensor(bboxes).float(),
-#             img_name,
-#         )
+        Returns:
+            point_coords (np.ndarray): 샘플링된 포인트의 좌표, shape (num_points, 2)
+            point_labels (np.ndarray): 샘플링된 포인트의 레이블 (1: foreground, 0: background)
+        """
+        # Create a binary structure for dilation
+        structure = np.ones((3, 3), dtype=np.uint8)
+
+        # Perform binary dilation to expand the mask
+        dilated_mask = scipy.ndimage.binary_dilation(mask, structure=structure, iterations=dilation_iterations)
+
+        # Define the background mask as the dilated mask excluding the original mask
+        bg_mask = dilated_mask & (~mask)
+
+        # Get foreground and background coordinates
+        fg_coords = np.argwhere(mask == 1)[:, ::-1]  # (x, y) coordinates of foreground
+        bg_coords = np.argwhere(bg_mask == 1)[:, ::-1]  # (x, y) coordinates of background
+
+        # If background points overlap with foreground, remove those points
+        bg_coords = np.array([coord for coord in bg_coords if mask[coord[1], coord[0]] == 0])
+
+        # Determine the number of foreground and background points to sample
+        num_fg = num_points // 2
+        num_bg = num_points - num_fg
+
+        # Randomly sample from foreground and background
+        if len(fg_coords) > 0:
+            fg_sampled = fg_coords[np.random.choice(len(fg_coords), size=num_fg, replace=True)]
+        else:
+            fg_sampled = np.empty((0, 2), dtype=int)  # Empty if no foreground
+        
+        if len(bg_coords) > 0:
+            bg_sampled = bg_coords[np.random.choice(len(bg_coords), size=num_bg, replace=True)]
+        else:
+            bg_sampled = np.empty((0, 2), dtype=int)  # Empty if no background
+
+        # Combine the sampled points and their corresponding labels
+        point_coords = np.vstack((fg_sampled, bg_sampled))
+        point_labels = np.hstack((np.ones(len(fg_sampled)), np.zeros(len(bg_sampled))))  # 1 for fg, 0 for bg
+
+        # Shuffle the points and labels to mix foreground and background points
+        indices = np.random.permutation(len(point_coords))
+        point_coords = point_coords[indices]
+        point_labels = point_labels[indices]
+
+        return point_coords, point_labels
+
+
 
 
 # %% set up parser
@@ -224,7 +214,7 @@ parser.add_argument(
     "-i",
     "--tr_npy_path",
     type=str,
-    default="/mnt/sda/minkyukim/sam_dataset/ivdm_npy_train_dataset_1024image",
+    default="/mnt/sda/minkyukim/sam_dataset_refined/brats_npy_train_dataset_1024image",
     help="path to training npy files; two subfolders: gts and imgs",
 )
 parser.add_argument("-task_name", type=str, default="MedSAM-ViT-B")
@@ -256,7 +246,7 @@ parser.add_argument("-use_amp", action="store_true", default=False, help="use am
 parser.add_argument(
     "--resume", type=str, default="", help="Resuming training from checkpoint"
 )
-parser.add_argument("--device", type=str, default="cuda:2")
+parser.add_argument("--device", type=str, default="cuda:1")
 args = parser.parse_args()
 
 if args.use_wandb:
@@ -276,37 +266,65 @@ if args.use_wandb:
 # %% set up model for training
 # device = args.device
 run_id = datetime.now().strftime("%Y%m%d-%H%M")
-model_save_path = "../../../../../../mnt/sda/minkyukim/pth/sam-tutorial_ivdm"
+model_save_path = "../../../../../../mnt/sda/minkyukim/pth/sam-tutorial_brats"
 #join(args.work_dir, args.task_name + "-" + run_id)
 device = torch.device(args.device)
 
 
 # %% sanity test of dataset class
-tr_dataset = NpyDataset(args.tr_npy_path )
+tr_dataset = NpyDataset(args.tr_npy_path)
 tr_dataloader = DataLoader(tr_dataset, batch_size=8, shuffle=True)
-for step, (image, gt, bboxes, names_temp) in enumerate(tr_dataloader):
-    print(image.shape, gt.shape, bboxes.shape)
+
+for step, (image, gt, bboxes, point_coords, point_labels, names_temp) in enumerate(tr_dataloader):
+    print(image.shape, gt.shape, bboxes.shape, point_coords.shape, point_labels.shape)
+    
     # show the example
     _, axs = plt.subplots(1, 2, figsize=(25, 25))
+    
+    # Randomly select an index to display
     idx = random.randint(0, 7)
+    
+    # Show image with mask and bbox
     axs[0].imshow(image[idx].cpu().permute(1, 2, 0).numpy())
     show_mask(gt[idx].cpu().numpy(), axs[0])
     show_box(bboxes[idx].numpy(), axs[0])
+
+    # Show foreground and background points
+    points_fg = point_coords[idx][point_labels[idx] == 1].cpu().numpy()
+    points_bg = point_coords[idx][point_labels[idx] == 0].cpu().numpy()
+    
+    # Plot foreground points in red and background points in blue
+    axs[0].scatter(points_fg[:, 0], points_fg[:, 1], color='red', label='Foreground Points')
+    axs[0].scatter(points_bg[:, 0], points_bg[:, 1], color='blue', label='Background Points')
+    
     axs[0].axis("off")
-    # set title
     axs[0].set_title(names_temp[idx])
+    
+    # Second subplot (another random index)
     idx = random.randint(0, 7)
     axs[1].imshow(image[idx].cpu().permute(1, 2, 0).numpy())
     show_mask(gt[idx].cpu().numpy(), axs[1])
     show_box(bboxes[idx].numpy(), axs[1])
+
+    # Plot foreground and background points for the second subplot
+    points_fg = point_coords[idx][point_labels[idx] == 1].cpu().numpy()
+    points_bg = point_coords[idx][point_labels[idx] == 0].cpu().numpy()
+
+    axs[1].scatter(points_fg[:, 0], points_fg[:, 1], color='red', label='Foreground Points')
+    axs[1].scatter(points_bg[:, 0], points_bg[:, 1], color='blue', label='Background Points')
+
     axs[1].axis("off")
-    # set title
     axs[1].set_title(names_temp[idx])
-    # plt.show()
+    
+    # Adjust and save the figure
     plt.subplots_adjust(wspace=0.01, hspace=0)
-    plt.savefig("./data_sanitycheck_ivdm.png", bbox_inches="tight", dpi=300)
+    plt.savefig("./data_sanitycheck_brats_point.png", bbox_inches="tight", dpi=300)
     plt.close()
+    
     break
+
+
+
 # %% set up model
 
 class MedSAM(nn.Module):
@@ -324,19 +342,34 @@ class MedSAM(nn.Module):
         for param in self.prompt_encoder.parameters():
             param.requires_grad = False
 
-    def forward(self, image, box):
+    def forward(self, image, box=None, point=None):
         image_embedding = self.image_encoder(image)  # (B, 256, 64, 64)
-        # do not compute gradients for prompt encoder
-        with torch.no_grad():
+        
+        # Prepare box and point inputs if provided
+        if box is not None:
             box_torch = torch.as_tensor(box, dtype=torch.float32, device=image.device)
             if len(box_torch.shape) == 2:
                 box_torch = box_torch[:, None, :]  # (B, 1, 4)
-
+        else:
+            box_torch = None
+        
+        if point is not None:
+            point_coords, point_labels = point
+            point_coords = torch.as_tensor(point_coords, dtype=torch.float32, device=image.device)
+            point_labels = torch.as_tensor(point_labels, dtype=torch.int64, device=image.device)
+            points = (point_coords, point_labels)
+        else:
+            points = None
+        
+        # do not compute gradients for prompt encoder
+        with torch.no_grad():
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
-                points=None,
+                points=points,
                 boxes=box_torch,
                 masks=None,
             )
+        
+        # Decode mask using image embedding and prompt encoder output
         low_res_masks, _ = self.mask_decoder(
             image_embeddings=image_embedding,  # (B, 256, 64, 64)
             image_pe=self.prompt_encoder.get_dense_pe(),  # (1, 256, 64, 64)
@@ -344,13 +377,17 @@ class MedSAM(nn.Module):
             dense_prompt_embeddings=dense_embeddings,  # (B, 256, 64, 64)
             multimask_output=False,
         )
+        
+        # Resize the low resolution masks to the original image size
         ori_res_masks = F.interpolate(
             low_res_masks,
             size=(image.shape[2], image.shape[3]),
             mode="bilinear",
             align_corners=False,
         )
+        
         return ori_res_masks
+
 
 
 def main():
@@ -418,24 +455,37 @@ def main():
 
     for epoch in range(start_epoch, num_epochs):
         epoch_loss = 0
-        for step, (image, gt2D, boxes, _) in enumerate(tqdm(train_dataloader)):
+        for step, (image, gt2D, boxes, point_coords, point_labels, _) in enumerate(tqdm(train_dataloader)):
             optimizer.zero_grad()
-            boxes_np = boxes.detach().cpu().numpy()
+            boxes_np = boxes.detach().cpu().numpy()  # Convert boxes to numpy
+            points_np = point_coords.detach().cpu().numpy()  # Convert points to numpy
+            point_labels_np = point_labels.detach().cpu().numpy()  # Convert point labels to numpy
+
             image, gt2D = image.to(device), gt2D.to(device)
+            point_coords, point_labels = point_coords.to(device), point_labels.to(device)
+
             if args.use_amp:
-                ## AMP
+                ## AMP (Automatic Mixed Precision)
                 with torch.autocast(device_type="cuda", dtype=torch.float16):
-                    medsam_pred = medsam_model(image, boxes_np)
-                    loss = seg_loss(medsam_pred, gt2D) + ce_loss(
-                        medsam_pred, gt2D.float()
-                    )
+                    # Forward pass with both boxes and points
+                    medsam_pred = medsam_model(image, boxes_np, (points_np, point_labels_np))
+                    
+                    # Calculate losses
+                    loss = seg_loss(medsam_pred, gt2D) + ce_loss(medsam_pred, gt2D.float())
+
+                # Backward pass and optimization with AMP
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
                 optimizer.zero_grad()
             else:
-                medsam_pred = medsam_model(image, boxes_np)
+                # Forward pass with both boxes and points
+                medsam_pred = medsam_model(image, boxes_np, (points_np, point_labels_np))
+                
+                # Calculate losses
                 loss = seg_loss(medsam_pred, gt2D) + ce_loss(medsam_pred, gt2D.float())
+                
+                # Backward pass and optimization without AMP
                 loss.backward()
                 optimizer.step()
                 optimizer.zero_grad()
@@ -445,6 +495,9 @@ def main():
 
         epoch_loss /= step
         losses.append(epoch_loss)
+
+    # Log or print losses here if necessary
+
         if args.use_wandb:
             wandb.log({"epoch_loss": epoch_loss})
         print(
@@ -456,7 +509,7 @@ def main():
         #     "optimizer": optimizer.state_dict(),
         #     "epoch": epoch,
         # }
-        torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_new.pth"))
+        torch.save(sam_model.state_dict(), join(model_save_path, f"medsam_model_{epoch}_refined_point.pth"))
         ## save the best model
         if epoch_loss < best_loss:
             best_loss = epoch_loss
@@ -465,7 +518,7 @@ def main():
             #     "optimizer": optimizer.state_dict(),
             #     "epoch": epoch,
             # }
-            torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_new.pth"))
+            torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_refined_point.pth"))
 
         # %% plot loss
         plt.plot(losses)

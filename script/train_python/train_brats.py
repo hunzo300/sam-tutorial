@@ -214,7 +214,7 @@ parser.add_argument(
     "-i",
     "--tr_npy_path",
     type=str,
-    default="/mnt/sda/minkyukim/sam_dataset/brats_npy_train_dataset_1024image",
+    default="/mnt/sda/minkyukim/sam_dataset_refined/brats_npy_train_dataset_1024image",
     help="path to training npy files; two subfolders: gts and imgs",
 )
 parser.add_argument("-task_name", type=str, default="MedSAM-ViT-B")
@@ -246,7 +246,7 @@ parser.add_argument("-use_amp", action="store_true", default=False, help="use am
 parser.add_argument(
     "--resume", type=str, default="", help="Resuming training from checkpoint"
 )
-parser.add_argument("--device", type=str, default="cuda:1")
+parser.add_argument("--device", type=str, default="cuda:2")
 args = parser.parse_args()
 
 if args.use_wandb:
@@ -446,7 +446,7 @@ def main():
         #     "optimizer": optimizer.state_dict(),
         #     "epoch": epoch,
         # }
-        torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_new.pth"))
+        torch.save(sam_model.state_dict(), join(model_save_path, f"medsam_model_{epoch}_refined.pth"))
         ## save the best model
         if epoch_loss < best_loss:
             best_loss = epoch_loss
@@ -455,7 +455,7 @@ def main():
             #     "optimizer": optimizer.state_dict(),
             #     "epoch": epoch,
             # }
-            torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_new.pth"))
+            torch.save(sam_model.state_dict(), join(model_save_path, "medsam_model_best_refined.pth"))
 
         # %% plot loss
         plt.plot(losses)

@@ -9,11 +9,11 @@ from script.train_ivdm import NpyDataset, show_mask, show_box, MedSAM, sam_model
 
 def unit_test():
     # dataset
-    dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/ivdm_npy_train_dataset_1024image")
+    dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/coco_npy_train_dataset_1024image")
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
     # load model
-    sam_model = sam_model_registry[args.model_type](checkpoint="/mnt/sda/minkyukim/pth/sam-tutorial_ivdm/medsam_model_best_new.pth")
+    sam_model = sam_model_registry[args.model_type](checkpoint="/mnt/sda/minkyukim/pth/sam-tutorial_coco/medsam_model_best_new.pth") #"/home/minkyukim/sam-tutorial/work_dir/SAM/sam_vit_b_01ec64.pth"
     medsam_model = MedSAM(
         image_encoder=sam_model.image_encoder,
         mask_decoder=sam_model.mask_decoder,
@@ -66,7 +66,7 @@ def unit_test():
         show_mask(pred_mask_resized_np, axs[2])
         axs[2].set_title("Predicted Mask")
 
-        plt.savefig(f"output_images/unit_test_output_{names_temp[0]}_new.png", bbox_inches="tight", dpi=300)
+        plt.savefig(f"output_images/coco_{names_temp[0]}_finetuned.png", bbox_inches="tight", dpi=300)
         plt.close()
 
         break

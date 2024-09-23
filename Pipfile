@@ -9,6 +9,7 @@ tqdm = "*"
 scikit-image = "*"
 monai = "*"
 autorootcwd = "*"
+opencv-python = "*"
 
 [requires]
 python_version = "3.11"

@@ -5,11 +5,11 @@ import numpy as np
 import os
 import torch.nn.functional as F
 
-from script.train import NpyDataset, show_mask, show_box, MedSAM, sam_model_registry, device, args, join
+from script.train_coco import NpyDataset, show_mask, show_box, MedSAM, sam_model_registry, device, args, join
 
 def unit_test():
     # dataset
-    dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/coco_npy_train_dataset_1024image__")
+    dataset = NpyDataset("/mnt/sda/minkyukim/sam_dataset/coco_npy_train_dataset_1024image")
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 
     # load model with an empty checkpoint string
