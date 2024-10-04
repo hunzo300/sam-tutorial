@@ -84,7 +84,7 @@ def inference_on_npy(data_root, npy_file=None, bbox_shift=20):
         break 
 
 if __name__ == "__main__":
-    data_root = "/mnt/sda/minkyukim/sam_dataset_refined/brats_npy_test_dataset_1024image"
-    npy_file = "1274_T1ce_lbl1.npy"  
+    data_root = "/mnt/sda/minkyukim/sam_dataset_refined/brats_npy_train_dataset_1024image"
+    npy_file = "1_T1ce_lbl1.npy"  
     
     inference_on_npy(data_root, npy_file=npy_file)
