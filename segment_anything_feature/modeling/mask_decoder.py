@@ -8,6 +8,8 @@
 import torch
 from torch import nn
 from torch.nn import functional as F
+import numpy as np
+import os
 
 from typing import List, Tuple, Type
 
@@ -112,6 +114,8 @@ class MaskDecoder(nn.Module):
         iou_pred = iou_pred[:, mask_slice]
 
         # Prepare output
+        layer_output_path = os.path.join(f'feature_output/ivdm_default/mask_output.npy')
+        np.save(layer_output_path, masks.detach().cpu().numpy())
         return masks, iou_pred
 
     def predict_masks(

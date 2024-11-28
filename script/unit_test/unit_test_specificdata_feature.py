@@ -5,7 +5,7 @@ import numpy as np
 import os
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from script.train_python.train_brats_feature import NpyDataset, show_mask, show_box, MedSAM, sam_model_registry, device, args, join
+from script.train_python.train_brats_adapter_feature import NpyDataset, show_mask, show_box, MedSAM, sam_model_registry, device, args, join
 
 def inference_on_npy(data_root, npy_file=None, bbox_shift=20):
     
@@ -19,8 +19,8 @@ def inference_on_npy(data_root, npy_file=None, bbox_shift=20):
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
 
     # 모델 로드
-    sam_model = sam_model_registry[args.model_type](checkpoint="/mnt/sda/minkyukim/pth/sam-tutorial_ivdm/medsam_model_16_refined.pth")#/home/minkyukim/sam-tutorial/work_dir/SAM/sam_vit_b_01ec64.pth
-    medsam_model = MedSAM(
+    sam_model = sam_model_registry[args.model_type](checkpoint="/mnt/sda/minkyukim/pth/sam-tutorial_ivdm_adapter/medsam_adapter_best.pth")#/home/minkyukim/sam-tutorial/work_dir/SAM/sam_vit_b_01ec64.pth"/mnt/sda/minkyukim/pth/sam-tutorial_ivdm/medsam_model_16_refined.pth"
+    medsam_model = MedSAM(                                                                                                      #/home/minkyukim/sam-tutorial/work_dir/SAM/sam_vit_b_01ec64.pth, /mnt/sda/minkyukim/pth/sam-tutorial_brats/medsam_model_11_refined.pth
         image_encoder=sam_model.image_encoder,
         mask_decoder=sam_model.mask_decoder,
         prompt_encoder=sam_model.prompt_encoder,
@@ -77,7 +77,7 @@ def inference_on_npy(data_root, npy_file=None, bbox_shift=20):
 
         # 결과 저장
         os.makedirs("output_images", exist_ok=True)
-        plt.savefig(f"output/output_images_refined/inference_output_{img_name[0]}.png", bbox_inches="tight", dpi=300)
+        plt.savefig(f"adapter_output_{img_name[0]}.png", bbox_inches="tight", dpi=300)
         plt.close()
 
         print(f"Inference completed for: {img_name[0]}")
@@ -85,6 +85,6 @@ def inference_on_npy(data_root, npy_file=None, bbox_shift=20):
 
 if __name__ == "__main__":
     data_root = "/mnt/sda/minkyukim/sam_dataset_refined/ivdm_npy_train_dataset_1024image"
-    npy_file = "01-15_fat_3.npy"  
+    npy_file = "01-15_fat_3.npy" #"1_T1ce_lbl3.npy"    
     
     inference_on_npy(data_root, npy_file=npy_file)

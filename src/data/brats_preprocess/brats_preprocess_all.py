@@ -46,7 +46,7 @@ def resize_and_copy_masks():
                 print(f"GT 마스크 저장 완료: {output_mask_path}")
 
 # 1. 이미지 리사이즈 및 저장 실행
-# resize_and_save_images()
+resize_and_save_images()
 
 # 2. GT 마스크 리사이즈 및 복사 실행
 resize_and_copy_masks()

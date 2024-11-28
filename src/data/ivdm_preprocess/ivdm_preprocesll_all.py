@@ -2,10 +2,10 @@ import numpy as np
 import os
 from skimage.transform import resize
 
-input_img_folder = "/mnt/sda/minkyukim/IVDM3Seg/test_seperated/imgs"
-output_img_folder = "/mnt/sda/minkyukim/sam_dataset_refined/ivdm_npy_test_dataset_1024image/imgs"
-input_gt_folder = "/mnt/sda/minkyukim/IVDM3Seg/test_seperated/gts"
-output_gt_folder = "/mnt/sda/minkyukim/sam_dataset_refined/ivdm_npy_test_dataset_1024image/gts"
+input_img_folder = "/mnt/sda/minkyukim/IVDM3Seg/train_seperated/imgs"
+output_img_folder = "/mnt/sda/minkyukim/sam_dataset_refined/ivdm_npy_train_dataset_256image/imgs"
+input_gt_folder = "/mnt/sda/minkyukim/IVDM3Seg/train_seperated/gts"
+output_gt_folder = "/mnt/sda/minkyukim/sam_dataset_refined/ivdm_npy_train_dataset_256image/gts"
 
 os.makedirs(output_img_folder, exist_ok=True)
 os.makedirs(output_gt_folder, exist_ok=True)
@@ -25,7 +25,7 @@ def resize_and_save_images():
   
             img = (img - np.min(img)) / (np.max(img) - np.min(img) + 1e-8)
             
-            resized_img = resize(img, (1024, 1024), anti_aliasing=True)
+            resized_img = resize(img, (256, 256), anti_aliasing=True)
    
             resized_img_rgb = np.stack([resized_img]*3, axis=-1)
             
